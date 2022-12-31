@@ -13,7 +13,7 @@ In order to remember which clippings were already uploaded, a page called `LastI
 Works only on MacOS.
 
 # Installation
-`pip install`  
+`pip install -r requirements.txt`  
 Make sure to fill `.env` with your Notion integration token and the ID of the page containing your books.
 The integration needs to be invited in the Notion UI to be allowed to make edits.
 
