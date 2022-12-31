@@ -1,105 +1,68 @@
+#!/usr/bin/env python3
 import os
+import shutil
+import sys
+from time import sleep
+
 from notion_client import Client
 from dotenv import load_dotenv
-
-from ClippingsParser import parseClippings
+from ClippingsParser import ClippingsParser
 from NotionRepository import NotionRepository
+from NotionSync import NotionSync
+from Diskutil import Diskutil
+from MacOS import MacOS
 
-clippingsFile = '/Users/tymon/Library/Mobile Documents/com~apple~CloudDocs/Kindle/My Clippings.txt'
+clippingsFileOnKindle = '/Volumes/Kindle/documents/My Clippings.txt'
+
+def watchForKindleConnection():
+    diskutil = Diskutil()
+    for _ in diskutil.waitForKindleConnection():
+        sleep(2)
+        copyClippingsFileToIcloud()
+        run(clippingsFileOnKindle)
 
 
-def run():
+def icloudBackupPath():
+    return os.environ['ICLOUD_BACKUP_PATH']
+
+
+def copyClippingsFileToIcloud():
+    # copy file from Kindle to iCloud
+    shutil.copyfile(clippingsFileOnKindle, icloudBackupPath())
+
+
+def run(filePath):
+    print('Running')
     notion = Client(auth=os.environ["NOTION_TOKEN"])
+    notionSync = NotionSync(notion)
+    notionRepo = NotionRepository(notion)
 
-    clippings = list(parseClippings(clippingsFile))
+    parser = ClippingsParser()
+    clippings = list(parser.parseClippings(filePath))
     lastClipping = clippings[-1]
 
-    repo = NotionRepository(notion)
-
-    lastClippingFromNotion = repo.getLastClippingFromNotion()
+    lastClippingFromNotion = notionRepo.getLastClippingFromNotion()
     if lastClippingFromNotion is not None:
         # find the index of lastClippingFromNotion in clippings
         lastClippingIndex = clippings.index(lastClippingFromNotion)
         if lastClippingIndex > 0:
             clippings = clippings[lastClippingIndex + 1:]
 
+    MacOS.notify(f'Found {len(clippings)} new clippings')
+    if len(clippings) > 0:
+        notionSync.syncWithNotion(clippings)
+        notionRepo.saveLastClippingToNotion(lastClipping)
+        MacOS.notify(f'Clippings synced')
 
-    syncWithNotion(clippings, notion)
-    repo.saveLastClippingToNotion(lastClipping)
+    MacOS.ejectKindle()
 
-
-def syncWithNotion(clippings, notion: Client):
-    clippingsByTitle = {}
-    for clipping in clippings:
-        if clipping.title not in clippingsByTitle:
-            clippingsByTitle[clipping.title] = []
-
-        clippingsByTitle[clipping.title].append(clipping)
-    parentPage = notion.pages.retrieve(os.environ["NOTION_BOOKS_PAGE_ID"])
-
-    children = notion.blocks.children.list(parentPage['id'])
-    childPageBlocks = [ x for x in children['results'] if x['type'] == 'child_page']
-
-    for title, clippings in clippingsByTitle.items():
-        bookPage = getOrCreateChildPage(notion, parentPage, title, childPageBlocks)
-
-        for clipping in clippings:
-            notion.blocks.children.append(
-                bookPage['id'],
-                children=[
-                    {
-                        "quote": {
-                            "rich_text": [
-                                {
-                                    "type": "text",
-                                    "text": {
-                                        "content": clipping.highlightText,
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    {
-                        "paragraph": {
-                            "rich_text": [
-                                {
-                                    "type": "text",
-                                    "text": {
-                                        "content": clipping.dateAndLocation,
-                                    }
-                                }
-                            ],
-                            "color": "gray"
-                        }
-                    }
-                ]
-            )
-    return
-
-
-def getOrCreateChildPage(notion: Client, parentPage: dict[str, object], title, childPageBlocks):
-
-    block = [x for x in childPageBlocks if x['child_page']['title'] == title]
-    if len(block) > 0:
-        return block[0]
-
-    return notion.pages.create(
-        parent={
-            "type": "page_id",
-            "page_id": parentPage['id'],
-        },
-        properties={
-            "title": [
-                {
-                    "text": {
-                        "content": title,
-                    }
-                }
-            ]
-        }
-    )
 
 
 if __name__ == '__main__':
     load_dotenv()
-    run()
+
+    # if commandline contains "watch"
+    if len(sys.argv) > 1 and sys.argv[1] == 'watch':
+        watchForKindleConnection()
+    else:
+        run(icloudBackupPath())
