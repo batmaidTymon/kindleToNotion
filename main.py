@@ -1,9 +1,9 @@
 import os
-from dataclasses import dataclass
 from notion_client import Client
 from dotenv import load_dotenv
 
 from ClippingsParser import parseClippings
+from NotionRepository import NotionRepository
 
 clippingsFile = '/Users/tymon/Library/Mobile Documents/com~apple~CloudDocs/Kindle/My Clippings.txt'
 
@@ -14,7 +14,18 @@ def run():
     clippings = list(parseClippings(clippingsFile))
     lastClipping = clippings[-1]
 
-    return syncWithNotion(clippings, notion)
+    repo = NotionRepository(notion)
+
+    lastClippingFromNotion = repo.getLastClippingFromNotion()
+    if lastClippingFromNotion is not None:
+        # find the index of lastClippingFromNotion in clippings
+        lastClippingIndex = clippings.index(lastClippingFromNotion)
+        if lastClippingIndex > 0:
+            clippings = clippings[lastClippingIndex + 1:]
+
+
+    syncWithNotion(clippings, notion)
+    repo.saveLastClippingToNotion(lastClipping)
 
 
 def syncWithNotion(clippings, notion: Client):
